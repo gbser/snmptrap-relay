@@ -1,0 +1,18 @@
+[Unit]
+Description=SNMP Trap Relay
+After=network.target
+
+[Service]
+Type=simple
+User=snmprelay
+Group=snmprelay
+WorkingDirectory=/opt/snmptrap-relay
+ExecStart=/opt/snmptrap-relay/snmptrap-relay --config /etc/snmptrap-relay/config.yaml
+Restart=always
+RestartSec=2
+NoNewPrivileges=true
+AmbientCapabilities=CAP_NET_BIND_SERVICE
+ExecReload=/bin/kill -HUP $MAINPID
+
+[Install]
+WantedBy=multi-user.target

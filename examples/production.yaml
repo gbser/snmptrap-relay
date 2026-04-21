@@ -1,0 +1,108 @@
+server:
+  host: 0.0.0.0
+  port: 162
+  max_datagram_size: 8192
+  cleanup_interval_seconds: 30
+
+logging:
+  level: INFO
+  format: json
+  file: /var/log/snmptrap-relay/snmptrap-relay.log
+
+receiver:
+  v3_users:
+    - user_name: nms-traps
+      authentication_protocol: sha256
+      authentication_passphrase: trap-auth-secret
+      privacy_protocol: aes256
+      privacy_passphrase: trap-priv-secret
+
+field_aliases:
+  "1.3.6.1.2.1.2.2.1.1": ifIndex
+  "1.3.6.1.4.1.9999.1.1": device_id
+  "1.3.6.1.4.1.9999.1.2": circuit_id
+  "1.3.6.1.4.1.9999.1.3": site_id
+
+forwarders:
+  - name: telegraf
+    host: 127.0.0.1
+    port: 9162
+    enabled: true
+  - name: external-nms
+    host: 10.10.10.20
+    port: 162
+    enabled: true
+
+filters:
+  default_action: keep
+  rules:
+    - id: drop_test_traps
+      action: drop
+      match:
+        any:
+          - field: trap_oid
+            op: eq
+            value: "1.3.6.1.4.1.9999.0.1"
+          - field: source_ip
+            op: prefix
+            value: "192.0.2."
+
+dedup_defaults:
+  ttl_seconds: 300
+  key_fields:
+    - trap_oid
+    - fields.device_id
+    - fields.circuit_id
+
+alarms:
+  - id: link_down
+    match:
+      trap_oid: "1.3.6.1.4.1.9999.0.10"
+    dedup:
+      ttl_seconds: 300
+      key_fields:
+        - trap_oid
+        - fields.device_id
+        - fields.circuit_id
+        - fields.ifIndex
+      hold_until_clear: true
+      # Clear trap for link_down.
+      clear:
+        match:
+          trap_oid: "1.3.6.1.4.1.9999.0.11"
+        key_fields:
+          - fields.device_id
+          - fields.circuit_id
+          - fields.ifIndex
+
+  - id: power_loss
+    match:
+      trap_oid: "1.3.6.1.4.1.9999.0.20"
+    dedup:
+      ttl_seconds: 600
+      key_fields:
+        - fields.site_id
+        - fields.device_id
+        - trap_oid
+      # Clear trap for power_loss.
+      clear:
+        match:
+          trap_oid: "1.3.6.1.4.1.9999.0.21"
+        key_fields:
+          - fields.site_id
+          - fields.device_id
+
+  - id: fan_alarm
+    match:
+      trap_oid: "1.3.6.1.4.1.9999.0.30"
+    dedup:
+      ttl_seconds: 600
+      key_fields:
+        - trap_oid
+        - fields.device_id
+      # Clear trap for fan_alarm.
+      clear:
+        match:
+          trap_oid: "1.3.6.1.4.1.9999.0.31"
+        key_fields:
+          - fields.device_id
