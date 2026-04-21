@@ -1,0 +1,17 @@
+./asn1ber_string.go
+./gosnmp.go
+./helper.go
+./interface.go
+./logger_debug.go
+./marshal.go
+./pdutype_string.go
+./snmperror_string.go
+./snmpv3authprotocol_string.go
+./snmpv3msgflags_string.go
+./snmpv3privprotocol_string.go
+./snmpv3securitymodel_string.go
+./trap.go
+./v3.go
+./v3_map.go
+./v3_usm.go
+./walk.go
