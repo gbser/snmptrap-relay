@@ -8,6 +8,7 @@ logging:
   level: INFO
   format: json
   file: /var/log/snmptrap-relay/snmptrap-relay.log
+  alerts_file: /var/log/snmptrap-relay/alerts.log
 
 receiver:
   v3_users:
@@ -74,6 +75,8 @@ alarms:
           - fields.device_id
           - fields.circuit_id
           - fields.ifIndex
+          #varbind_oid: "1.3.6.1.4.1.9999.1.3"
+          #regex: "(?i)clear"
 
   - id: power_loss
     match:

@@ -35,6 +35,20 @@ func New(cfg model.LoggingConfig) (*slog.Logger, error) {
 	return slog.New(handler), nil
 }
 
+// NewAlertsWriter opens the alerts-only log file configured in LoggingConfig
+// and returns a writer that can be used to append alert lines. If no alerts
+// file is configured, (nil, nil) is returned.
+func NewAlertsWriter(cfg model.LoggingConfig) (io.WriteCloser, error) {
+	if cfg.AlertsFile == "" {
+		return nil, nil
+	}
+	fh, err := os.OpenFile(cfg.AlertsFile, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o644)
+	if err != nil {
+		return nil, err
+	}
+	return fh, nil
+}
+
 func parseLevel(level string) slog.Level {
 	switch strings.ToUpper(level) {
 	case "DEBUG":

@@ -52,7 +52,7 @@ func TestDedupAndClear(t *testing.T) {
 	fwd := &fakeForwarder{}
 	dec := &fakeDecoder{}
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
-	eng := New(cfg, fwd, dec, logger)
+	eng := New(cfg, fwd, dec, logger, nil)
 
 	first := newEvent("10.0.0.1", 1000, "alarm.1", "7", "A")
 	if _, err := eng.HandleEvent(first); err != nil {
@@ -104,7 +104,7 @@ func TestFilterDrop(t *testing.T) {
 	fwd := &fakeForwarder{}
 	dec := &fakeDecoder{}
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
-	eng := New(cfg, fwd, dec, logger)
+	eng := New(cfg, fwd, dec, logger, nil)
 
 	ev := newEvent("10.0.0.1", 1000, "drop.1", "7", "A")
 	if _, err := eng.HandleEvent(ev); err != nil {

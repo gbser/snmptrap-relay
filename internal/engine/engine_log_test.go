@@ -36,7 +36,7 @@ func TestHoldUntilClearLogsExplicitTTL(t *testing.T) {
 	logger := slog.New(slog.NewTextHandler(&buf, nil))
 	fwd := &fakeForwarder{}
 	dec := &fakeDecoder{}
-	eng := New(cfg, fwd, dec, logger)
+	eng := New(cfg, fwd, dec, logger, nil)
 
 	ev := newEvent("10.0.0.1", 1000, "alarm.1", "", "")
 	if _, err := eng.HandleEvent(ev); err != nil {

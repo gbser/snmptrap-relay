@@ -18,6 +18,10 @@ type LoggingConfig struct {
 	Level  string `yaml:"level"`
 	Format string `yaml:"format"`
 	File   string `yaml:"file"`
+	// AlertsFile is an optional separate file path where only forwarded
+	// alerts are written. Useful for log-parsing exporters that should
+	// consume only deduplicated alerts.
+	AlertsFile string `yaml:"alerts_file"`
 }
 
 type ForwarderConfig struct {
@@ -66,6 +70,12 @@ type DedupConfig struct {
 type DedupClearConfig struct {
 	Match     MatchSpec `yaml:"match"`
 	KeyFields []string  `yaml:"key_fields"`
+	// VarBindOID is the OID of the varbind to test with Regex when deciding
+	// whether a trap is a clear for a held alarm. Example: "1.3.6.1.4.1..."
+	VarBindOID string `yaml:"varbind_oid"`
+	// Regex is applied to the varbind value (string) and if it matches the
+	// trap is considered a clear. The regex should be a Go-compatible regexp.
+	Regex string `yaml:"regex"`
 }
 
 type FilterRuleConfig struct {

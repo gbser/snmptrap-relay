@@ -2,13 +2,16 @@ package engine
 
 import (
 	"fmt"
+	"io"
 	"log/slog"
+	"regexp"
 	"sync/atomic"
 	"time"
 
 	"snmptrap-relay/internal/dedup"
 	"snmptrap-relay/internal/match"
 	"snmptrap-relay/internal/model"
+	"snmptrap-relay/internal/oidutil"
 )
 
 type Decoder interface {
@@ -24,6 +27,7 @@ type runtimeState struct {
 	forwarder PacketForwarder
 	decoder   Decoder
 	logger    *slog.Logger
+	alertsWriter io.Writer
 }
 
 type Engine struct {
@@ -38,20 +42,21 @@ type Outcome struct {
 	RuleID    string
 }
 
-func New(cfg *model.AppConfig, forwarder PacketForwarder, decoder Decoder, logger *slog.Logger) *Engine {
+func New(cfg *model.AppConfig, forwarder PacketForwarder, decoder Decoder, logger *slog.Logger, alertsWriter io.Writer) *Engine {
 	e := &Engine{
 		dedup: dedup.NewStore(),
 	}
-	e.Reload(cfg, forwarder, decoder, logger)
+	e.Reload(cfg, forwarder, decoder, logger, alertsWriter)
 	return e
 }
 
-func (e *Engine) Reload(cfg *model.AppConfig, forwarder PacketForwarder, decoder Decoder, logger *slog.Logger) {
+func (e *Engine) Reload(cfg *model.AppConfig, forwarder PacketForwarder, decoder Decoder, logger *slog.Logger, alertsWriter io.Writer) {
 	e.state.Store(&runtimeState{
-		cfg:       cfg,
-		forwarder: forwarder,
-		decoder:   decoder,
-		logger:    logger,
+		cfg:          cfg,
+		forwarder:    forwarder,
+		decoder:      decoder,
+		logger:       logger,
+		alertsWriter: alertsWriter,
 	})
 }
 
@@ -125,6 +130,23 @@ func (e *Engine) HandleEvent(event *model.TrapEvent) (Outcome, error) {
 			"trap_oid", fallback(event.TrapOID),
 			"missing_fields", dedupKey.MissingFields,
 		)
+		if state.alertsWriter != nil {
+			// Build varbinds list similar to snmptrapd human-readable output
+			var vbPairs []string
+			for _, vb := range event.VarBinds {
+				vbPairs = append(vbPairs, fmt.Sprintf("%s = \"%s\"", vb.OID, vb.Value))
+			}
+			vbs := ""
+			if len(vbPairs) > 0 {
+				vbs = "[ " + joinStrings(vbPairs, ", ") + " ]"
+			}
+			fmt.Fprintf(state.alertsWriter, "%s %s -> TRAP %s %s\n",
+				time.Now().UTC().Format(time.RFC3339Nano),
+				fmt.Sprintf("%s:%d", event.SourceIP, event.SourcePort),
+				fallback(event.TrapOID),
+				vbs,
+			)
+		}
 		return Outcome{Accepted: true, Forwarded: true, Reason: "dedup_disabled", RuleID: alarmRule.ID}, nil
 	}
 
@@ -162,6 +184,22 @@ func (e *Engine) HandleEvent(event *model.TrapEvent) (Outcome, error) {
 	}
 	args = append(args, dedupLogFields(alarmRule.Dedup)...)
 	state.logger.Info("trap_forwarded", args...)
+	if state.alertsWriter != nil {
+		var vbPairs []string
+		for _, vb := range event.VarBinds {
+			vbPairs = append(vbPairs, fmt.Sprintf("%s = \"%s\"", vb.OID, vb.Value))
+		}
+		vbs := ""
+		if len(vbPairs) > 0 {
+			vbs = "[ " + joinStrings(vbPairs, ", ") + " ]"
+		}
+		fmt.Fprintf(state.alertsWriter, "%s %s -> TRAP %s %s\n",
+			time.Now().UTC().Format(time.RFC3339Nano),
+			fmt.Sprintf("%s:%d", event.SourceIP, event.SourcePort),
+			fallback(event.TrapOID),
+			vbs,
+		)
+	}
 	return Outcome{Accepted: true, Forwarded: true, Reason: "alarm", RuleID: alarmRule.ID}, nil
 }
 
@@ -178,6 +216,18 @@ func (e *Engine) Cleanup(now time.Time) {
 func (e *Engine) current() *runtimeState {
 	state, _ := e.state.Load().(*runtimeState)
 	return state
+}
+
+// joinStrings is a minimal helper to join strings without importing strings
+func joinStrings(parts []string, sep string) string {
+	if len(parts) == 0 {
+		return ""
+	}
+	out := parts[0]
+	for i := 1; i < len(parts); i++ {
+		out += sep + parts[i]
+	}
+	return out
 }
 
 func (e *Engine) evaluateFilters(cfg *model.AppConfig, event *model.TrapEvent) (string, bool, error) {
@@ -230,6 +280,23 @@ func (e *Engine) applyAlarmClearRules(state *runtimeState, event *model.TrapEven
 		}
 		if !matched {
 			continue
+		}
+		// If the clear rule specifies a varbind OID and a regex, apply the
+		// regex against the varbind value and only treat this trap as a clear
+		// when the regex matches.
+		if clearRule.VarBindOID != "" && clearRule.Regex != "" {
+			// Normalize OID to match keys in RawVarBindMap
+			oid := oidutil.Normalize(clearRule.VarBindOID)
+			val := event.RawVarBindMap[oid]
+			re, err := regexp.Compile(clearRule.Regex)
+			if err != nil {
+				state.logger.Error("clear_regex_invalid", "rule", alarm.ID, "regex", clearRule.Regex, "error", err)
+				continue
+			}
+			if !re.MatchString(val) {
+				// regex did not match: this trap is not considered a clear
+				continue
+			}
 		}
 		keyFields := clearRule.KeyFields
 		if len(keyFields) == 0 {

@@ -46,6 +46,15 @@ func run() int {
 		return 1
 	}
 
+	alertsWriter, err := logging.NewAlertsWriter(cfg.Logging)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "alerts log error: %v\n", err)
+		return 1
+	}
+	if alertsWriter != nil {
+		defer alertsWriter.Close()
+	}
+
 	if checkOnly {
 		validatorForwarder, err := forward.NewUDP(cfg.Forwarders)
 		if err != nil {
@@ -76,7 +85,7 @@ func run() int {
 		return 1
 	}
 
-	relayEngine := engine.New(cfg, relayForwarder, decoder, logger)
+	relayEngine := engine.New(cfg, relayForwarder, decoder, logger, alertsWriter)
 	relayServer, err := server.New(cfg.Server, relayEngine, logger)
 	if err != nil {
 		logger.Error("server_init_failed", "error", err)
@@ -110,6 +119,11 @@ func run() int {
 					logger.Error("logging_reload_failed", "error", err)
 					continue
 				}
+				nextAlertsWriter, err := logging.NewAlertsWriter(nextCfg.Logging)
+				if err != nil {
+					logger.Error("alerts_log_reload_failed", "error", err)
+					continue
+				}
 				nextForwarder, err := forward.NewUDP(nextCfg.Forwarders)
 				if err != nil {
 					logger.Error("forwarder_reload_failed", "error", err)
@@ -121,9 +135,14 @@ func run() int {
 					continue
 				}
 				oldForwarder := relayForwarder
-				relayEngine.Reload(nextCfg, nextForwarder, nextDecoder, nextLogger)
+				relayEngine.Reload(nextCfg, nextForwarder, nextDecoder, nextLogger, nextAlertsWriter)
 				relayForwarder = nextForwarder
+				// Close previous alerts writer and replace logger/writer
 				logger = nextLogger
+				if alertsWriter != nil {
+					_ = alertsWriter.Close()
+				}
+				alertsWriter = nextAlertsWriter
 				if oldForwarder != nil {
 					_ = oldForwarder.Close()
 				}
