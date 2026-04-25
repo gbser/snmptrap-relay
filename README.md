@@ -17,6 +17,7 @@ It listens for traps, applies filtering and in-memory deduplication, logs every 
 - Supports clear traps nested under each alarm's dedup rule.
 - Forwards accepted traps as raw SNMP UDP datagrams to one or more receivers.
 - Logs what was filtered, deduplicated, cleared or forwarded.
+- Creates a log in snmptrapd format so it can be parsed by SNMP Exporter for Prometheus/Grafana.
 
 ## Project layout
 
