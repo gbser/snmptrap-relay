@@ -23,10 +23,10 @@ type PacketForwarder interface {
 }
 
 type runtimeState struct {
-	cfg       *model.AppConfig
-	forwarder PacketForwarder
-	decoder   Decoder
-	logger    *slog.Logger
+	cfg          *model.AppConfig
+	forwarder    PacketForwarder
+	decoder      Decoder
+	logger       *slog.Logger
 	alertsWriter io.Writer
 }
 
@@ -106,6 +106,24 @@ func (e *Engine) HandleEvent(event *model.TrapEvent) (Outcome, error) {
 			"source", fmt.Sprintf("%s:%d", event.SourceIP, event.SourcePort),
 			"trap_oid", fallback(event.TrapOID),
 		)
+
+		if state.alertsWriter != nil && !event.AlertsLogged {
+			var vbPairs []string
+			for _, vb := range event.VarBinds {
+				vbPairs = append(vbPairs, fmt.Sprintf("%s = \"%s\"", vb.OID, vb.Value))
+			}
+			vbs := ""
+			if len(vbPairs) > 0 {
+				vbs = "[ " + joinStrings(vbPairs, ", ") + " ]"
+			}
+			fmt.Fprintf(state.alertsWriter, "%s %s -> TRAP %s %s\n",
+				time.Now().UTC().Format(time.RFC3339Nano),
+				fmt.Sprintf("%s:%d", event.SourceIP, event.SourcePort),
+				fallback(event.TrapOID),
+				vbs,
+			)
+			event.AlertsLogged = true
+		}
 		return Outcome{Accepted: true, Forwarded: true, Reason: "pass-through"}, nil
 	}
 
@@ -130,7 +148,7 @@ func (e *Engine) HandleEvent(event *model.TrapEvent) (Outcome, error) {
 			"trap_oid", fallback(event.TrapOID),
 			"missing_fields", dedupKey.MissingFields,
 		)
-		if state.alertsWriter != nil {
+		if state.alertsWriter != nil && !event.AlertsLogged {
 			// Build varbinds list similar to snmptrapd human-readable output
 			var vbPairs []string
 			for _, vb := range event.VarBinds {
@@ -146,6 +164,7 @@ func (e *Engine) HandleEvent(event *model.TrapEvent) (Outcome, error) {
 				fallback(event.TrapOID),
 				vbs,
 			)
+			event.AlertsLogged = true
 		}
 		return Outcome{Accepted: true, Forwarded: true, Reason: "dedup_disabled", RuleID: alarmRule.ID}, nil
 	}
@@ -184,7 +203,7 @@ func (e *Engine) HandleEvent(event *model.TrapEvent) (Outcome, error) {
 	}
 	args = append(args, dedupLogFields(alarmRule.Dedup)...)
 	state.logger.Info("trap_forwarded", args...)
-	if state.alertsWriter != nil {
+	if state.alertsWriter != nil && !event.AlertsLogged {
 		var vbPairs []string
 		for _, vb := range event.VarBinds {
 			vbPairs = append(vbPairs, fmt.Sprintf("%s = \"%s\"", vb.OID, vb.Value))
@@ -199,6 +218,7 @@ func (e *Engine) HandleEvent(event *model.TrapEvent) (Outcome, error) {
 			fallback(event.TrapOID),
 			vbs,
 		)
+		event.AlertsLogged = true
 	}
 	return Outcome{Accepted: true, Forwarded: true, Reason: "alarm", RuleID: alarmRule.ID}, nil
 }
@@ -325,6 +345,25 @@ func (e *Engine) applyAlarmClearRules(state *runtimeState, event *model.TrapEven
 				"trap_oid", fallback(event.TrapOID),
 				"active", false,
 			)
+
+			if state.alertsWriter != nil && !event.AlertsLogged {
+				var vbPairs []string
+				for _, vb := range event.VarBinds {
+					vbPairs = append(vbPairs, fmt.Sprintf("%s = \"%s\"", vb.OID, vb.Value))
+				}
+				vbs := ""
+				if len(vbPairs) > 0 {
+					vbs = "[ " + joinStrings(vbPairs, ", ") + " ]"
+				}
+				fmt.Fprintf(state.alertsWriter, "%s %s -> TRAP %s %s\n",
+					time.Now().UTC().Format(time.RFC3339Nano),
+					fmt.Sprintf("%s:%d", event.SourceIP, event.SourcePort),
+					fallback(event.TrapOID),
+					vbs,
+				)
+				// mark event to avoid duplicate alerts writes later
+				event.AlertsLogged = true
+			}
 			continue
 		}
 		state.logger.Info("trap_cleared",
@@ -338,6 +377,25 @@ func (e *Engine) applyAlarmClearRules(state *runtimeState, event *model.TrapEven
 			"first_trap_oid", fallback(stateCleared.FirstEvent.TrapOID),
 			"suppressed_count", stateCleared.SuppressedCount,
 		)
+
+		if state.alertsWriter != nil && !event.AlertsLogged {
+			var vbPairs []string
+			for _, vb := range event.VarBinds {
+				vbPairs = append(vbPairs, fmt.Sprintf("%s = \"%s\"", vb.OID, vb.Value))
+			}
+			vbs := ""
+			if len(vbPairs) > 0 {
+				vbs = "[ " + joinStrings(vbPairs, ", ") + " ]"
+			}
+			fmt.Fprintf(state.alertsWriter, "%s %s -> TRAP %s %s\n",
+				time.Now().UTC().Format(time.RFC3339Nano),
+				fmt.Sprintf("%s:%d", event.SourceIP, event.SourcePort),
+				fallback(event.TrapOID),
+				vbs,
+			)
+			// mark event to avoid duplicate alerts writes later
+			event.AlertsLogged = true
+		}
 	}
 }
 

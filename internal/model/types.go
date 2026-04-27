@@ -133,6 +133,9 @@ type TrapEvent struct {
 	VarBinds        []VarBind
 	RawVarBindMap   map[string]string
 	Fields          map[string]string
+	// AlertsLogged indicates whether this event has already been written
+	// to the alerts file to avoid duplicate entries.
+	AlertsLogged bool
 }
 
 func (e *TrapEvent) Summary() string {
