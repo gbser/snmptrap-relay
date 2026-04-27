@@ -85,46 +85,16 @@ func (e *Engine) HandleEvent(event *model.TrapEvent) (Outcome, error) {
 		return Outcome{Accepted: false, Forwarded: false, Reason: "filtered", RuleID: ruleID}, nil
 	}
 
-	e.applyAlarmClearRules(state, event)
+	if e.applyAlarmClearRules(state, event) {
+		return e.forwardPassThrough(state, event)
+	}
 
 	alarmRule, ok, err := e.matchAlarm(state.cfg, event)
 	if err != nil {
 		return Outcome{}, err
 	}
 	if !ok {
-		if err := state.forwarder.Send(event.RawBytes); err != nil {
-			state.logger.Error("trap_forward_failed",
-				"rule", "pass-through",
-				"source", fmt.Sprintf("%s:%d", event.SourceIP, event.SourcePort),
-				"trap_oid", fallback(event.TrapOID),
-				"error", err,
-			)
-			return Outcome{Accepted: true, Forwarded: false, Reason: "forward_failed"}, err
-		}
-		state.logger.Info("trap_forwarded",
-			"rule", "pass-through",
-			"source", fmt.Sprintf("%s:%d", event.SourceIP, event.SourcePort),
-			"trap_oid", fallback(event.TrapOID),
-		)
-
-		if state.alertsWriter != nil && !event.AlertsLogged {
-			var vbPairs []string
-			for _, vb := range event.VarBinds {
-				vbPairs = append(vbPairs, fmt.Sprintf("%s = \"%s\"", vb.OID, vb.Value))
-			}
-			vbs := ""
-			if len(vbPairs) > 0 {
-				vbs = "[ " + joinStrings(vbPairs, ", ") + " ]"
-			}
-			fmt.Fprintf(state.alertsWriter, "%s %s -> TRAP %s %s\n",
-				time.Now().UTC().Format(time.RFC3339Nano),
-				fmt.Sprintf("%s:%d", event.SourceIP, event.SourcePort),
-				fallback(event.TrapOID),
-				vbs,
-			)
-			event.AlertsLogged = true
-		}
-		return Outcome{Accepted: true, Forwarded: true, Reason: "pass-through"}, nil
+		return e.forwardPassThrough(state, event)
 	}
 
 	dedupKey, err := match.BuildDedupKey(event, alarmRule.Dedup.KeyFields)
@@ -287,7 +257,44 @@ func (e *Engine) matchAlarm(cfg *model.AppConfig, event *model.TrapEvent) (model
 	return model.AlarmRuleConfig{}, false, nil
 }
 
-func (e *Engine) applyAlarmClearRules(state *runtimeState, event *model.TrapEvent) {
+func (e *Engine) forwardPassThrough(state *runtimeState, event *model.TrapEvent) (Outcome, error) {
+	if err := state.forwarder.Send(event.RawBytes); err != nil {
+		state.logger.Error("trap_forward_failed",
+			"rule", "pass-through",
+			"source", fmt.Sprintf("%s:%d", event.SourceIP, event.SourcePort),
+			"trap_oid", fallback(event.TrapOID),
+			"error", err,
+		)
+		return Outcome{Accepted: true, Forwarded: false, Reason: "forward_failed"}, err
+	}
+	state.logger.Info("trap_forwarded",
+		"rule", "pass-through",
+		"source", fmt.Sprintf("%s:%d", event.SourceIP, event.SourcePort),
+		"trap_oid", fallback(event.TrapOID),
+	)
+
+	if state.alertsWriter != nil && !event.AlertsLogged {
+		var vbPairs []string
+		for _, vb := range event.VarBinds {
+			vbPairs = append(vbPairs, fmt.Sprintf("%s = \"%s\"", vb.OID, vb.Value))
+		}
+		vbs := ""
+		if len(vbPairs) > 0 {
+			vbs = "[ " + joinStrings(vbPairs, ", ") + " ]"
+		}
+		fmt.Fprintf(state.alertsWriter, "%s %s -> TRAP %s %s\n",
+			time.Now().UTC().Format(time.RFC3339Nano),
+			fmt.Sprintf("%s:%d", event.SourceIP, event.SourcePort),
+			fallback(event.TrapOID),
+			vbs,
+		)
+		event.AlertsLogged = true
+	}
+	return Outcome{Accepted: true, Forwarded: true, Reason: "pass-through"}, nil
+}
+
+func (e *Engine) applyAlarmClearRules(state *runtimeState, event *model.TrapEvent) bool {
+	matchedClear := false
 	for _, alarm := range state.cfg.Alarms {
 		clearRule := alarm.Dedup.Clear
 		if clearRule == nil {
@@ -301,6 +308,7 @@ func (e *Engine) applyAlarmClearRules(state *runtimeState, event *model.TrapEven
 		if !matched {
 			continue
 		}
+		matchedClear = true
 		// If the clear rule specifies a varbind OID and a regex, apply the
 		// regex against the varbind value and only treat this trap as a clear
 		// when the regex matches.
@@ -315,6 +323,7 @@ func (e *Engine) applyAlarmClearRules(state *runtimeState, event *model.TrapEven
 			}
 			if !re.MatchString(val) {
 				// regex did not match: this trap is not considered a clear
+				matchedClear = false
 				continue
 			}
 		}
@@ -322,7 +331,11 @@ func (e *Engine) applyAlarmClearRules(state *runtimeState, event *model.TrapEven
 		if len(keyFields) == 0 {
 			keyFields = alarm.Dedup.KeyFields
 		}
-		dedupKey, err := match.BuildDedupKey(event, keyFields)
+		clearKeyEvent := event
+		if clearKeyTrapOID, ok := dedupKeyTrapOID(alarm.Match, keyFields); ok {
+			clearKeyEvent = cloneEventWithTrapOID(event, clearKeyTrapOID)
+		}
+		dedupKey, err := match.BuildDedupKey(clearKeyEvent, keyFields)
 		if err != nil {
 			state.logger.Error("trap_clear_failed", "rule", alarm.ID, "error", err)
 			continue
@@ -397,6 +410,7 @@ func (e *Engine) applyAlarmClearRules(state *runtimeState, event *model.TrapEven
 			event.AlertsLogged = true
 		}
 	}
+	return matchedClear
 }
 
 func fallback(value string) string {
@@ -431,4 +445,78 @@ func dedupTTLNote(cfg model.DedupConfig) string {
 		return ""
 	}
 	return "will not clear without a matching clear trap or a restart"
+}
+
+func dedupKeyTrapOID(spec model.MatchSpec, keyFields []string) (string, bool) {
+	for _, field := range keyFields {
+		if field == "trap_oid" {
+			return staticMatchFieldValue(spec, "trap_oid")
+		}
+	}
+	return "", false
+}
+
+func staticMatchFieldValue(spec model.MatchSpec, field string) (string, bool) {
+	if value, ok := spec.Raw[field]; ok {
+		return fmt.Sprint(value), true
+	}
+	rawAll, ok := spec.Raw["all"]
+	if !ok {
+		return "", false
+	}
+	list, ok := rawAll.([]any)
+	if !ok {
+		return "", false
+	}
+	resolved := ""
+	found := false
+	for _, item := range list {
+		mapping, ok := item.(map[string]any)
+		if !ok {
+			converted, ok := item.(map[any]any)
+			if !ok {
+				continue
+			}
+			mapping = map[string]any{}
+			for key, value := range converted {
+				mapping[fmt.Sprint(key)] = value
+			}
+		}
+		conditionField, _ := mapping["field"].(string)
+		if conditionField != field {
+			continue
+		}
+		op, _ := mapping["op"].(string)
+		if op == "" {
+			op = "eq"
+		}
+		if op != "eq" {
+			continue
+		}
+		value := fmt.Sprint(mapping["value"])
+		if found && resolved != value {
+			return "", false
+		}
+		resolved = value
+		found = true
+	}
+	return resolved, found
+}
+
+func cloneEventWithTrapOID(event *model.TrapEvent, trapOID string) *model.TrapEvent {
+	if trapOID == "" {
+		return event
+	}
+	clone := *event
+	clone.TrapOID = trapOID
+	if event.Fields == nil {
+		clone.Fields = map[string]string{"trap_oid": trapOID}
+		return &clone
+	}
+	clone.Fields = make(map[string]string, len(event.Fields)+1)
+	for key, value := range event.Fields {
+		clone.Fields[key] = value
+	}
+	clone.Fields["trap_oid"] = trapOID
+	return &clone
 }

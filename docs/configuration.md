@@ -198,7 +198,12 @@ Set `hold_until_clear: true` when you want the alarm to stay suppressed until th
 | Key | Type | Default | Description |
 | --- | --- | --- | --- |
 | `match` | mapping | required | Trap match expression for the clear event. |
-| `key_fields` | list of strings or null | null | Optional key fields to use for the clear trap. If omitted, the parent alarm's `key_fields` are reused. |
+| `key_fields` | list of strings or null | null | Optional key fields to use for the clear trap. If omitted, the parent alarm's `key_fields` are reused. When `trap_oid` is included and the clear uses a different OID, the relay uses the parent alarm's configured `trap_oid` value for key matching so the clear still resets the original alarm. |
+
+This supports both clear styles:
+
+- Same alarm and clear OID, with `varbind_oid` + `regex` to distinguish the clear event.
+- Different alarm and clear OIDs, while still keeping `trap_oid` inside the dedup key to avoid cross-deduplicating unrelated alarms.
 
 ## Match syntax
 
