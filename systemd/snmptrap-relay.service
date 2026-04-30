@@ -8,6 +8,10 @@ User=snmprelay
 Group=snmprelay
 WorkingDirectory=/opt/snmptrap-relay
 ExecStart=/opt/snmptrap-relay/snmptrap-relay --config /etc/snmptrap-relay/config.yaml
+# Optional runtime override when you do not want to set runtime.memory_limit in YAML.
+# Environment=GOMEMLIMIT=128MiB
+# Optional hard cgroup cap. Keep this above the Go soft limit when both are used.
+# MemoryMax=192M
 Restart=always
 RestartSec=2
 NoNewPrivileges=true

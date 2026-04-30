@@ -2,6 +2,7 @@ package model
 
 import (
 	"fmt"
+	"strings"
 	"time"
 
 	"gopkg.in/yaml.v3"
@@ -12,6 +13,21 @@ type ServerConfig struct {
 	Port                   int    `yaml:"port"`
 	MaxDatagramSize        int    `yaml:"max_datagram_size"`
 	CleanupIntervalSeconds int    `yaml:"cleanup_interval_seconds"`
+	MaxDedupEntries        int    `yaml:"max_dedup_entries"`
+	QueueSize              int    `yaml:"queue_size"`
+	WorkerCount            int    `yaml:"worker_count"`
+	StatsLogIntervalSecs   int    `yaml:"stats_log_interval_seconds"`
+}
+
+type MetricsConfig struct {
+	Enabled bool   `yaml:"enabled"`
+	Host    string `yaml:"host"`
+	Port    int    `yaml:"port"`
+	Path    string `yaml:"path"`
+}
+
+type RuntimeConfig struct {
+	MemoryLimit string `yaml:"memory_limit"`
 }
 
 type LoggingConfig struct {
@@ -25,10 +41,11 @@ type LoggingConfig struct {
 }
 
 type ForwarderConfig struct {
-	Name    string `yaml:"name"`
-	Host    string `yaml:"host"`
-	Port    int    `yaml:"port"`
-	Enabled bool   `yaml:"enabled"`
+	Name       string `yaml:"name"`
+	Host       string `yaml:"host"`
+	Port       int    `yaml:"port"`
+	Enabled    bool   `yaml:"enabled"`
+	SourceHost string `yaml:"source_host"`
 }
 
 type SnmpV3UserConfig struct {
@@ -97,6 +114,8 @@ type AlarmRuleConfig struct {
 
 type AppConfig struct {
 	Server        ServerConfig      `yaml:"server"`
+	Runtime       RuntimeConfig     `yaml:"runtime"`
+	Metrics       MetricsConfig     `yaml:"metrics"`
 	Logging       LoggingConfig     `yaml:"logging"`
 	Receiver      ReceiverConfig    `yaml:"receiver"`
 	FieldAliases  map[string]string `yaml:"field_aliases"`
@@ -104,6 +123,13 @@ type AppConfig struct {
 	Filters       FiltersConfig     `yaml:"filters"`
 	DedupDefaults DedupConfig       `yaml:"dedup_defaults"`
 	Alarms        []AlarmRuleConfig `yaml:"alarms"`
+}
+
+func (c *AppConfig) GetRuntimeMemoryLimit() string {
+	if c == nil {
+		return ""
+	}
+	return strings.TrimSpace(c.Runtime.MemoryLimit)
 }
 
 type VarBind struct {

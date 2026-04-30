@@ -3,6 +3,21 @@ server:
   port: 162
   max_datagram_size: 8192
   cleanup_interval_seconds: 30
+  max_dedup_entries: 10000
+  queue_size: 1024
+  worker_count: 1
+  stats_log_interval_seconds: 60
+
+runtime:
+  # Optional Go soft memory limit for this process.
+  # Examples: 64MiB, 128MiB, 256MiB, off
+  # memory_limit: 128MiB
+
+metrics:
+  enabled: false
+  host: 127.0.0.1
+  port: 9163
+  path: /metrics
 
 logging:
   level: INFO
@@ -30,6 +45,8 @@ forwarders:
     host: 127.0.0.1
     port: 9162
     enabled: true
+    # Optional relay source address for outbound traps.
+    # source_host: 192.0.2.10
   - name: external
     host: 10.10.10.20
     port: 162

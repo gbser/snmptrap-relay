@@ -1,0 +1,85 @@
+server:
+  host: "::"
+  port: 162
+  max_datagram_size: 8192
+  cleanup_interval_seconds: 30
+  max_dedup_entries: 10000
+  queue_size: 1024
+  worker_count: 1
+  stats_log_interval_seconds: 60
+
+runtime:
+  # Optional Go soft memory limit for this process.
+  # memory_limit: 128MiB
+
+metrics:
+  enabled: true
+  host: "::1"
+  port: 9163
+  path: /metrics
+
+logging:
+  level: INFO
+  format: json
+  # Optional production paths:
+  # file: /var/log/snmptrap-relay/snmptrap-relay.log
+  # alerts_file: /var/log/snmptrap-relay/alerts.log
+
+receiver:
+  v3_users:
+    - user_name: nms-traps
+      authentication_protocol: sha256
+      authentication_passphrase: trap-auth-secret
+      privacy_protocol: aes256
+      privacy_passphrase: trap-priv-secret
+
+field_aliases:
+  "1.3.6.1.2.1.2.2.1.1": ifIndex
+  "1.3.6.1.4.1.9999.1.1": device_id
+  "1.3.6.1.4.1.9999.1.2": circuit_id
+
+forwarders:
+  - name: telegraf-v6
+    host: "::1"
+    port: 9162
+    enabled: true
+    source_host: "::1"
+  - name: external-nms-v6
+    host: "2001:db8::20"
+    port: 162
+    enabled: false
+    source_host: "2001:db8::15"
+
+filters:
+  default_action: keep
+  rules:
+    - id: drop_test_traps
+      action: drop
+      match:
+        trap_oid: "1.3.6.1.4.1.9999.0.1"
+
+dedup_defaults:
+  ttl_seconds: 300
+  key_fields:
+    - trap_oid
+    - fields.ifIndex
+    - fields.device_id
+
+alarms:
+  - id: link_down
+    match:
+      trap_oid: "1.3.6.1.4.1.9999.0.10"
+    dedup:
+      ttl_seconds: 300
+      key_fields:
+        - trap_oid
+        - fields.ifIndex
+        - fields.device_id
+      hold_until_clear: true
+      clear:
+        match:
+          trap_oid: "1.3.6.1.4.1.9999.0.11"
+        key_fields:
+          - trap_oid
+          - fields.ifIndex
+          - fields.device_id

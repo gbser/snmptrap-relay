@@ -42,10 +42,13 @@ If you build on one machine and deploy to another, copy the resulting binary and
 cp config.example.yaml /etc/snmptrap-relay/config.yaml
 ```
 
+If you want the relay to listen and forward over IPv6, start from `examples/ipv6.yaml` instead of `config.example.yaml`.
+
 Edit the following sections first:
 
 - `server.host`
 - `server.port`
+- `runtime.memory_limit` if you want an in-config Go soft memory target
 - `forwarders`
 - `field_aliases`
 - `alarms` (including each alarm's `dedup.clear` block, if used)
@@ -83,6 +86,22 @@ Reload config without restart:
 ```bash
 sudo systemctl reload snmptrap-relay
 ```
+
+Optional memory controls:
+
+- Set `runtime.memory_limit` in `/etc/snmptrap-relay/config.yaml` when you want the relay itself to configure the Go soft memory target.
+- Set `Environment=GOMEMLIMIT=...` in the systemd unit if you prefer to keep the memory target outside the YAML file.
+- Set `MemoryMax=...` in the systemd unit if you want a hard cgroup memory cap.
+
+Example unit overrides:
+
+```ini
+[Service]
+Environment=GOMEMLIMIT=128MiB
+MemoryMax=192M
+```
+
+If you use both a Go soft limit and a systemd hard cap, keep `MemoryMax` above the Go limit.
 
 ## 8. Listener port notes
 

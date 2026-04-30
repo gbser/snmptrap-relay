@@ -44,7 +44,7 @@ type Outcome struct {
 
 func New(cfg *model.AppConfig, forwarder PacketForwarder, decoder Decoder, logger *slog.Logger, alertsWriter io.Writer) *Engine {
 	e := &Engine{
-		dedup: dedup.NewStore(),
+		dedup: dedup.NewStore(cfg.Server.MaxDedupEntries),
 	}
 	e.Reload(cfg, forwarder, decoder, logger, alertsWriter)
 	return e
@@ -141,18 +141,23 @@ func (e *Engine) HandleEvent(event *model.TrapEvent) (Outcome, error) {
 
 	if s := e.dedup.Get(alarmRule.ID, dedupKey.Hash, event.ReceivedAt); s != nil {
 		s = e.dedup.Touch(alarmRule.ID, dedupKey.Hash, event)
-		args := []any{
-			"rule", alarmRule.ID,
-			"key", dedupKey.Repr,
-			"source", fmt.Sprintf("%s:%d", event.SourceIP, event.SourcePort),
-			"first_seen", s.FirstSeenAt.Format(time.RFC3339Nano),
-			"first_source", fmt.Sprintf("%s:%d", s.FirstEvent.SourceIP, s.FirstEvent.SourcePort),
-			"first_trap_oid", fallback(s.FirstEvent.TrapOID),
-			"suppressed_count", s.SuppressedCount,
+		if s == nil {
+			// A concurrent clear removed the dedup state after Get; treat this event
+			// as a fresh alarm below.
+		} else {
+			args := []any{
+				"rule", alarmRule.ID,
+				"key", dedupKey.Repr,
+				"source", fmt.Sprintf("%s:%d", event.SourceIP, event.SourcePort),
+				"first_seen", s.FirstSeenAt.Format(time.RFC3339Nano),
+				"first_source", fmt.Sprintf("%s:%d", s.FirstEvent.SourceIP, s.FirstEvent.SourcePort),
+				"first_trap_oid", fallback(s.FirstEvent.TrapOID),
+				"suppressed_count", s.SuppressedCount,
+			}
+			args = append(args, dedupLogFields(alarmRule.Dedup)...)
+			state.logger.Info("trap_deduplicated", args...)
+			return Outcome{Accepted: false, Forwarded: false, Reason: "duplicate", RuleID: alarmRule.ID}, nil
 		}
-		args = append(args, dedupLogFields(alarmRule.Dedup)...)
-		state.logger.Info("trap_deduplicated", args...)
-		return Outcome{Accepted: false, Forwarded: false, Reason: "duplicate", RuleID: alarmRule.ID}, nil
 	}
 
 	e.dedup.Put(alarmRule.ID, dedupKey.Hash, dedupKey.Repr, event, alarmRule.Dedup.TTLSeconds, alarmRule.Dedup.HoldUntilClear)

@@ -10,17 +10,32 @@ import (
 	"snmptrap-relay/internal/model"
 )
 
+type Resource struct {
+	Logger *slog.Logger
+	Closer io.Closer
+}
+
 func New(cfg model.LoggingConfig) (*slog.Logger, error) {
+	resource, err := NewResource(cfg)
+	if err != nil {
+		return nil, err
+	}
+	return resource.Logger, nil
+}
+
+func NewResource(cfg model.LoggingConfig) (Resource, error) {
 	level := parseLevel(cfg.Level)
 	opts := &slog.HandlerOptions{Level: level}
 
 	var writer io.Writer = os.Stdout
+	var closer io.Closer
 	if file := cfg.File; file != "" {
-		fh, err := os.OpenFile(file, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o644)
+		fh, err := os.OpenFile(file, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o600)
 		if err != nil {
-			return nil, err
+			return Resource{}, err
 		}
 		writer = fh
+		closer = fh
 	}
 
 	var handler slog.Handler
@@ -30,9 +45,12 @@ func New(cfg model.LoggingConfig) (*slog.Logger, error) {
 	case "", "text":
 		handler = slog.NewTextHandler(writer, opts)
 	default:
-		return nil, fmt.Errorf("unsupported logging format %q", cfg.Format)
+		if closer != nil {
+			_ = closer.Close()
+		}
+		return Resource{}, fmt.Errorf("unsupported logging format %q", cfg.Format)
 	}
-	return slog.New(handler), nil
+	return Resource{Logger: slog.New(handler), Closer: closer}, nil
 }
 
 // NewAlertsWriter opens the alerts-only log file configured in LoggingConfig
@@ -42,7 +60,7 @@ func NewAlertsWriter(cfg model.LoggingConfig) (io.WriteCloser, error) {
 	if cfg.AlertsFile == "" {
 		return nil, nil
 	}
-	fh, err := os.OpenFile(cfg.AlertsFile, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o644)
+	fh, err := os.OpenFile(cfg.AlertsFile, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o600)
 	if err != nil {
 		return nil, err
 	}

@@ -4,6 +4,7 @@ import (
 	"encoding/hex"
 	"fmt"
 	"math/big"
+	"math/bits"
 	"net"
 	"unicode/utf8"
 )
@@ -55,15 +56,27 @@ func (r *Reader) ReadTLV() (TLV, error) {
 		if count == 0 {
 			return TLV{}, &Error{Msg: "indefinite BER length is not supported"}
 		}
+		if count > 4 {
+			return TLV{}, &Error{Msg: "BER length is too large"}
+		}
 		if r.Remaining() < count {
 			return TLV{}, &Error{Msg: "truncated BER length"}
 		}
 		for i := 0; i < count; i++ {
+			if length > (int(^uint(0)>>1) >> 8) {
+				return TLV{}, &Error{Msg: "BER length overflow"}
+			}
 			length = (length << 8) | int(r.data[r.pos+i])
+		}
+		if bits.UintSize == 32 && length < 0 {
+			return TLV{}, &Error{Msg: "BER length overflow"}
 		}
 		r.pos += count
 	}
 
+	if length < 0 {
+		return TLV{}, &Error{Msg: "BER length overflow"}
+	}
 	if r.Remaining() < length {
 		return TLV{}, &Error{Msg: "truncated BER value"}
 	}

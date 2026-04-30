@@ -3,6 +3,19 @@ server:
   port: 162
   max_datagram_size: 8192
   cleanup_interval_seconds: 30
+  max_dedup_entries: 10000
+  queue_size: 4096
+  worker_count: 2
+  stats_log_interval_seconds: 60
+
+runtime:
+  memory_limit: 256MiB
+
+metrics:
+  enabled: true
+  host: 127.0.0.1
+  port: 9163
+  path: /metrics
 
 logging:
   level: INFO
@@ -29,10 +42,12 @@ forwarders:
     host: 127.0.0.1
     port: 9162
     enabled: true
+    source_host: 127.0.0.1
   - name: external-nms
     host: 10.10.10.20
     port: 162
     enabled: true
+    source_host: 10.10.10.15
 
 filters:
   default_action: keep

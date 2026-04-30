@@ -10,6 +10,7 @@ import (
 
 func TestHoldUntilClearLogsExplicitTTL(t *testing.T) {
 	cfg := &model.AppConfig{
+		Server:  model.ServerConfig{MaxDedupEntries: 128},
 		Filters: model.FiltersConfig{DefaultAction: "keep"},
 		Alarms: []model.AlarmRuleConfig{
 			{

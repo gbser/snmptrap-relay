@@ -199,6 +199,7 @@ func TestDedupAndClearWithSameTrapOIDAndRegexStyleMatch(t *testing.T) {
 
 func TestFilterDrop(t *testing.T) {
 	cfg := &model.AppConfig{
+		Server: model.ServerConfig{MaxDedupEntries: 128},
 		Filters: model.FiltersConfig{
 			DefaultAction: "keep",
 			Rules: []model.FilterRuleConfig{
@@ -222,6 +223,52 @@ func TestFilterDrop(t *testing.T) {
 	}
 	if got := len(fwd.sent); got != 0 {
 		t.Fatalf("forward count after filter drop = %d, want 0", got)
+	}
+}
+
+func TestDedupEvictsOldestWhenLimitReached(t *testing.T) {
+	cfg := &model.AppConfig{
+		Server:  model.ServerConfig{MaxDedupEntries: 1},
+		Filters: model.FiltersConfig{DefaultAction: "keep"},
+		Alarms: []model.AlarmRuleConfig{
+			{
+				ID: "link_down",
+				Match: model.MatchSpec{
+					Raw: map[string]any{"trap_oid": "alarm.1"},
+				},
+				Dedup: model.DedupConfig{
+					TTLSeconds: 60,
+					KeyFields:  []string{"fields.ifIndex", "fields.device_id"},
+				},
+			},
+		},
+	}
+
+	fwd := &fakeForwarder{}
+	dec := &fakeDecoder{}
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+	eng := New(cfg, fwd, dec, logger, nil)
+
+	first := newEvent("10.0.0.1", 1000, "alarm.1", "7", "A")
+	first.ReceivedAt = time.Unix(1, 0).UTC()
+	if _, err := eng.HandleEvent(first); err != nil {
+		t.Fatalf("HandleEvent(first) error = %v", err)
+	}
+
+	second := newEvent("10.0.0.2", 1001, "alarm.1", "8", "B")
+	second.ReceivedAt = time.Unix(2, 0).UTC()
+	if _, err := eng.HandleEvent(second); err != nil {
+		t.Fatalf("HandleEvent(second) error = %v", err)
+	}
+
+	againFirst := newEvent("10.0.0.3", 1002, "alarm.1", "7", "A")
+	againFirst.ReceivedAt = time.Unix(3, 0).UTC()
+	if _, err := eng.HandleEvent(againFirst); err != nil {
+		t.Fatalf("HandleEvent(againFirst) error = %v", err)
+	}
+
+	if got, want := len(fwd.sent), 3; got != want {
+		t.Fatalf("forward count after eviction = %d, want %d", got, want)
 	}
 }
 

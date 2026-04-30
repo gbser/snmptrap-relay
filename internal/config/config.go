@@ -41,6 +41,27 @@ func applyDefaults(cfg *model.AppConfig) {
 	if cfg.Server.CleanupIntervalSeconds == 0 {
 		cfg.Server.CleanupIntervalSeconds = 30
 	}
+	if cfg.Server.MaxDedupEntries == 0 {
+		cfg.Server.MaxDedupEntries = 10000
+	}
+	if cfg.Server.QueueSize == 0 {
+		cfg.Server.QueueSize = 1024
+	}
+	if cfg.Server.WorkerCount == 0 {
+		cfg.Server.WorkerCount = 1
+	}
+	if cfg.Server.StatsLogIntervalSecs == 0 {
+		cfg.Server.StatsLogIntervalSecs = 60
+	}
+	if cfg.Metrics.Host == "" {
+		cfg.Metrics.Host = "127.0.0.1"
+	}
+	if cfg.Metrics.Port == 0 {
+		cfg.Metrics.Port = 9163
+	}
+	if cfg.Metrics.Path == "" {
+		cfg.Metrics.Path = "/metrics"
+	}
 	if cfg.Logging.Level == "" {
 		cfg.Logging.Level = "INFO"
 	}
@@ -65,6 +86,40 @@ func applyDefaults(cfg *model.AppConfig) {
 }
 
 func validate(cfg *model.AppConfig) error {
+	if strings.TrimSpace(cfg.Runtime.MemoryLimit) != "" {
+		if _, err := ParseMemoryLimit(cfg.Runtime.MemoryLimit); err != nil {
+			return fmt.Errorf("runtime.memory_limit: %w", err)
+		}
+	}
+	if cfg.Server.Port < 0 || cfg.Server.Port > 65535 {
+		return fmt.Errorf("server.port must be between 0 and 65535")
+	}
+	if cfg.Server.MaxDatagramSize <= 0 {
+		return fmt.Errorf("server.max_datagram_size must be greater than 0")
+	}
+	if cfg.Server.CleanupIntervalSeconds <= 0 {
+		return fmt.Errorf("server.cleanup_interval_seconds must be greater than 0")
+	}
+	if cfg.Server.MaxDedupEntries <= 0 {
+		return fmt.Errorf("server.max_dedup_entries must be greater than 0")
+	}
+	if cfg.Server.QueueSize <= 0 {
+		return fmt.Errorf("server.queue_size must be greater than 0")
+	}
+	if cfg.Server.WorkerCount <= 0 {
+		return fmt.Errorf("server.worker_count must be greater than 0")
+	}
+	if cfg.Server.StatsLogIntervalSecs < 0 {
+		return fmt.Errorf("server.stats_log_interval_seconds must be greater than or equal to 0")
+	}
+	if cfg.Metrics.Enabled {
+		if cfg.Metrics.Port < 0 || cfg.Metrics.Port > 65535 {
+			return fmt.Errorf("metrics.port must be between 0 and 65535")
+		}
+		if !strings.HasPrefix(cfg.Metrics.Path, "/") {
+			return fmt.Errorf("metrics.path must start with /")
+		}
+	}
 	if cfg.Filters.DefaultAction != "keep" && cfg.Filters.DefaultAction != "drop" {
 		return fmt.Errorf("filters.default_action must be keep or drop")
 	}

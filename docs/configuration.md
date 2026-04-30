@@ -5,6 +5,8 @@ This file describes every configuration section and parameter supported by the r
 ## Top-level sections
 
 - `server`
+- `runtime`
+- `metrics`
 - `logging`
 - `receiver`
 - `field_aliases`
@@ -21,6 +23,34 @@ This file describes every configuration section and parameter supported by the r
 | `port` | integer | `162` | UDP listen port. Use a privileged port or a high port with firewall/NAT forwarding. |
 | `max_datagram_size` | integer | `8192` | Maximum packet size accepted by the listener. |
 | `cleanup_interval_seconds` | integer | `30` | Interval for dedup cleanup. |
+| `max_dedup_entries` | integer | `10000` | Maximum in-memory dedup states retained before the oldest state is evicted. |
+| `queue_size` | integer | `1024` | Size of the in-process trap queue between UDP reads and workers. When full, new traps are dropped and a warning is logged. |
+| `worker_count` | integer | `1` | Number of trap processing workers consuming the queue. |
+| `stats_log_interval_seconds` | integer | `60` | Interval for periodic `server_stats` log entries. Set to `0` to disable periodic stats logging. |
+
+## `runtime`
+
+Optional Go runtime process controls.
+
+| Key | Type | Default | Description |
+| --- | --- | --- | --- |
+| `memory_limit` | string or null | null | Optional Go soft memory limit for the process. Examples: `64MiB`, `128MiB`, `256MiB`, raw bytes such as `67108864`, or `off` to disable a previously configured in-process limit. |
+
+Example:
+
+```yaml
+runtime:
+  memory_limit: 128MiB
+```
+
+This setting applies `runtime/debug.SetMemoryLimit` at startup and on config reload. It controls the Go runtime soft memory target. It is not the same as a hard operating system or cgroup limit.
+
+If you run under `systemd`, you may also set:
+
+- `Environment=GOMEMLIMIT=128MiB` for an equivalent Go soft limit outside YAML
+- `MemoryMax=192M` for a hard cgroup limit
+
+When both are used, keep the hard `MemoryMax` above `runtime.memory_limit`.
 
 ## `logging`
 
@@ -29,6 +59,31 @@ This file describes every configuration section and parameter supported by the r
 | `level` | string | `INFO` | Logging level. |
 | `format` | string | `text` | `text` or `json`. |
 | `file` | string or null | null | Optional log file path. If omitted, logs go to stdout/stderr. |
+| `alerts_file` | string or null | null | Optional alerts-only log file path. Log files created by the relay use mode `0600`. |
+
+## `metrics`
+
+Optional Prometheus endpoint configuration.
+
+| Key | Type | Default | Description |
+| --- | --- | --- | --- |
+| `enabled` | boolean | `false` | Enables the Prometheus metrics HTTP endpoint. |
+| `host` | string | `127.0.0.1` | Listen address for the metrics HTTP server. |
+| `port` | integer | `9163` | Listen port for the metrics HTTP server. |
+| `path` | string | `/metrics` | HTTP path serving Prometheus metrics. |
+
+Example:
+
+```yaml
+metrics:
+  enabled: true
+  host: 127.0.0.1
+  port: 9163
+  path: /metrics
+```
+
+Changes to `metrics.*` are applied on config reload. If the new metrics listener cannot be started, the relay keeps the previous metrics configuration and logs the reload failure.
+The same listener also serves a fixed `GET /healthz` endpoint that returns `200 OK` with `ok`.
 
 ## `receiver`
 
@@ -76,6 +131,7 @@ List of SNMP receivers that receive accepted traps.
 | `host` | string | required | Receiver host or IP. |
 | `port` | integer | required | Receiver UDP port. |
 | `enabled` | boolean | `true` | Disable a target without deleting it. |
+| `source_host` | string or null | null | Optional local source IP address to bind for outbound traps. Useful on multi-homed IPv4 or IPv6 hosts. |
 
 Example:
 
@@ -84,9 +140,11 @@ forwarders:
   - name: telegraf
     host: 127.0.0.1
     port: 9162
+    source_host: 127.0.0.1
 ```
 
 Forwarders receive the original SNMP trap datagram as-is. The relay does not rewrite OIDs, varbinds or other payload fields before sending the packet onward.
+When `source_host` is set, the relay binds the outbound socket to that local address before forwarding.
 
 ## `filters`
 
@@ -287,5 +345,8 @@ If all configured key fields are present, a deterministic hash is built from the
 - If the key already exists inside the TTL window, the trap is suppressed.
 - If the alarm's embedded clear trap matches, the state is removed and the next alarm is forwarded again.
 - If `hold_until_clear: true` is set, the trap remains suppressed indefinitely until a matching clear arrives or the process restarts.
+- `server.max_dedup_entries` limits total in-memory dedup state. When the limit is reached, the least recently seen state is evicted first.
+- `server_stats` log entries expose current in-process counters such as received traps, queue drops, parse failures, forwards, filters, and deduplications.
+- If the in-process queue fills, the relay logs `trap_queue_full` and drops the newest trap instead of blocking the UDP read loop.
 
 If a key field is missing from the trap, dedup is skipped for that event and a warning is logged.
